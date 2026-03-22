@@ -83,8 +83,11 @@ void my_free(void *ptr)
 
     block_meta *free_block = (block_meta*)ptr - 1;
 
+    if (free_block->magic != 0x12345678) return;
+    
     free_block->free = 1;
-
+    free_block->magic = 0xDEADBEEF;
+    
     /*------------Coalescing------------*/
     
     //Evalua si el bloque previo esta libre y si lo esta los fusiona
@@ -120,7 +123,7 @@ void my_free(void *ptr)
 void *my_calloc(size_t nmemb, size_t size) 
 {
     if (nmemb == 0 || size == 0) return NULL;
-    if (size != 0 && nmemb == SIZE_MAX / size) return NULL;
+    if (size != 0 && nmemb > SIZE_MAX / size) return NULL;
     size_t Array_size = nmemb * size;
     
     void *ptr = my_malloc(Array_size);
@@ -133,7 +136,48 @@ void *my_calloc(size_t nmemb, size_t size)
     
 }
 
-void *my_realloc(void *ptr, size_t size) {
-    // TODO: Redimensionar el bloque o moverlo a uno nuevo.
-    return NULL;
+void *my_realloc(void *ptr, size_t size) 
+{
+    if(ptr == NULL) return my_malloc(size);
+    if(size == 0) 
+    {
+        my_free(ptr);
+        return NULL;
+    }
+    
+    size = (size + 7) & ~7;
+    
+    block_meta *block = (block_meta*)ptr - 1;
+    
+    if (block->magic != 0x12345678) return NULL;
+        
+    
+    if(block->size >= size)
+    {
+        if (block->size >= size + META_SIZE + 8)
+        {
+            block_meta *new_block = (block_meta*)((char*)(block + 1) + size);
+
+            new_block->size = block->size - size - META_SIZE;
+            new_block->next = block->next;
+            new_block->free = 1;
+            new_block->magic = 0x12345678;
+
+            block->size = size;
+            block->next = new_block;
+        }
+
+        return ptr; 
+    }
+    else
+    {
+        void* new_ptr = my_malloc(size);
+        if (new_ptr == NULL) return NULL;
+        memcpy(new_ptr, ptr, block->size);
+        my_free(ptr);
+        return new_ptr;
+
+    }
+    
+    
 }
