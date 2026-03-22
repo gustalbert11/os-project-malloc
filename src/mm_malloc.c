@@ -32,7 +32,23 @@ void *my_malloc(size_t size) {
 
     // Buscar bloque libre
     while (current != NULL) {
+        
         if (current->free && current->size >= size) {
+            if (current->size >= size + META_SIZE + 8) {
+                
+                // Crear nuevo bloque en la parte restante
+                block_meta *new_block = (block_meta*)((char*)(current + 1) + size);
+
+                new_block->size = current->size - size - META_SIZE;
+                new_block->next = current->next;
+                new_block->free = 1;
+                new_block->magic = 0x12345678;
+
+                // Ajustar bloque actual
+                current->size = size;
+                current->next = new_block;
+            }
+
             current->free = 0;
             current->magic = 0x12345678;
             return (void*)(current + 1);
