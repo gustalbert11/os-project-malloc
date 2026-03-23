@@ -6,17 +6,19 @@
 void *base = NULL;
 
 void *my_malloc(size_t size) {
-    if (size == 0) return NULL;
+    if (size == 0) return NULL; // no tiene sentido crear un bloque de tamaño 0
 
-    size = (size + 7) & ~7;
+    size = (size + 7) & ~7; // Alineación a 8 bytes
 
-    // Si es el primer bloque
+    // Si es el primer bloque 
     if (base == NULL) {
-        void *block = sbrk(META_SIZE + size);
-        if (block == (void*) -1) return NULL;
+        
+        void *block = sbrk(META_SIZE + size); //le pido mas memoria al kernel 
+        if (block == (void*) -1) return NULL; // si falla sbrk devuelvo NULL
 
-        block_meta *current = (block_meta*)block;
+        block_meta *current = (block_meta*)block; // la direccion de block se interpreta como un block_meta
 
+        //Inicializacion de los meta-datos 
         current->size = size;
         current->next = NULL;
         current->free = 0;
@@ -24,20 +26,22 @@ void *my_malloc(size_t size) {
 
         base = current;
 
-        return (void*)(current + 1);
+        return (void*)(current + 1); // retornamos un void* que apunta al inicio del payload
     }
 
-    block_meta *current = base;
-    block_meta *prev = NULL;
+    block_meta *current = base; //inico en la base de la lista 
+    block_meta *prev = NULL; //usado para guardar el bloque anterior en el recorrido 
 
     // Buscar bloque libre
     while (current != NULL) {
         
         if (current->free && current->size >= size) {
+            
+            /*--------------SPLITTING--------------*/
             if (current->size >= size + META_SIZE + 8) {
                 
                 // Crear nuevo bloque en la parte restante
-                block_meta *new_block = (block_meta*)((char*)(current + 1) + size);
+                block_meta *new_block = (block_meta*)((char*)(current + 1) + size); // Usamos char* para hacer aritmética en bytes y posicionarnos exactamente después del payload
 
                 new_block->size = current->size - size - META_SIZE;
                 new_block->next = current->next;
@@ -81,14 +85,14 @@ void *my_malloc(size_t size) {
 void my_free(void *ptr) 
 {
 
-    block_meta *free_block = (block_meta*)ptr - 1;
+    block_meta *free_block = (block_meta*)ptr - 1; // creo el bloque apuntando a los meta-datos 
 
-    if (free_block->magic != 0x12345678) return;
+    if (free_block->magic != 0x12345678) return; //verifico que sea un bloque de memoria asignado por my_malloc
     
     free_block->free = 1;
-    free_block->magic = 0xDEADBEEF;
+    free_block->magic = 0xDEADBEEF; // como el bloque es libre cambio el valor de magic para evitar double free
     
-    /*------------Coalescing------------*/
+    /*------------COALESCING------------*/
     
     //Evalua si el bloque previo esta libre y si lo esta los fusiona
 
@@ -122,15 +126,17 @@ void my_free(void *ptr)
 
 void *my_calloc(size_t nmemb, size_t size) 
 {
-    if (nmemb == 0 || size == 0) return NULL;
-    if (size != 0 && nmemb > SIZE_MAX / size) return NULL;
-    size_t Array_size = nmemb * size;
+    if (nmemb == 0 || size == 0) return NULL; 
+    if (size != 0 && nmemb > SIZE_MAX / size) return NULL; // medida para evitar overflow 
     
-    void *ptr = my_malloc(Array_size);
-    if(ptr != NULL)
+    size_t total_size = nmemb * size;
+    
+    void *ptr = my_malloc(total_size); // reservo memoria
+    
+    if(ptr != NULL) 
     {
-        void* result = memset(ptr, 0,Array_size);
-        return result;
+        void* result = memset(ptr, 0, total_size); // todo lleno toda la memoria de ceros 
+        return result; 
     }
     return NULL;
     
@@ -138,10 +144,10 @@ void *my_calloc(size_t nmemb, size_t size)
 
 void *my_realloc(void *ptr, size_t size) 
 {
-    if(ptr == NULL) return my_malloc(size);
+    if(ptr == NULL) return my_malloc(size); // Si ptr es NULL, realloc se comporta como malloc
     if(size == 0) 
     {
-        my_free(ptr);
+        my_free(ptr); // Si size es 0, realloc se comporta como free
         return NULL;
     }
     
@@ -152,8 +158,9 @@ void *my_realloc(void *ptr, size_t size)
     if (block->magic != 0x12345678) return NULL;
         
     
-    if(block->size >= size)
+    if(block->size >= size)  // Verifica que tamaño es mayor si el original o el nuevo 
     {
+         /*--------------SPLITTING--------------*/
         if (block->size >= size + META_SIZE + 8)
         {
             block_meta *new_block = (block_meta*)((char*)(block + 1) + size);
@@ -166,11 +173,13 @@ void *my_realloc(void *ptr, size_t size)
             block->size = size;
             block->next = new_block;
         }
-
+        // Si el bloque no es lo suficientemente grande para dividirlo retorno el puntero sin mayor proceso 
         return ptr; 
     }
     else
     {
+        // Copiamos los datos del bloque original al nuevo.
+        // Solo se copian block->size bytes (truncamiento si el nuevo tamaño es menor).
         void* new_ptr = my_malloc(size);
         if (new_ptr == NULL) return NULL;
         memcpy(new_ptr, ptr, block->size);
